@@ -9,18 +9,13 @@ MODEL_PATH = "xgb_shelf_life_model.pkl"
 SCALER_PATH = "scaler.pkl"
 ENCODERS_PATH = "encoders.pkl"
 
-# Load model
 xgb_model = joblib.load(MODEL_PATH)
-
-# Load scaler
 scaler = joblib.load(SCALER_PATH)
 
-# Load encoders
 encoders = joblib.load(ENCODERS_PATH)
 le_dish = encoders["dish"]
 le_storage = encoders["storage"]
 le_type = encoders["type"]
-
 
 # ============================
 # Feature Engineering Helpers
@@ -80,9 +75,8 @@ def is_nonveg(dish):
 # ============================
 
 def adjust_prediction(pred_hours, base_life, storage, temp_c, humidity, dish_type):
-    pred = max(pred_hours, 0.01)  # avoid negative predictions
+    pred = max(pred_hours, 0.01)
 
-    # Dish type multipliers
     type_multiplier = {
         "FriedSnack": 0.7,
         "NonVegCurry": 0.6,
@@ -96,7 +90,6 @@ def adjust_prediction(pred_hours, base_life, storage, temp_c, humidity, dish_typ
 
     pred *= type_multiplier.get(dish_type, 0.8)
 
-    # Storage effect
     s = storage.lower()
     if "open" in s:
         pred *= 0.3 if temp_c >= 30 else 0.5 if temp_c >= 25 else 0.7
@@ -105,15 +98,13 @@ def adjust_prediction(pred_hours, base_life, storage, temp_c, humidity, dish_typ
     elif "refrig" in s or "fridge" in s or "cold" in s:
         pred *= 1.5 if temp_c <= 4 else 1.2
 
-    # Humidity effect
     if humidity >= 80:
         pred *= 0.75
     elif humidity >= 60:
         pred *= 0.9
 
-    # Hard sanity limits
-    pred = max(pred, base_life * 0.3)  # 30% min
-    pred = min(pred, base_life * 3.5)  # 3.5x max
+    pred = max(pred, base_life * 0.3)
+    pred = min(pred, base_life * 3.5)
 
     return float(np.round(pred, 2))
 
@@ -138,29 +129,22 @@ def format_hours_minutes(pred_hours):
 # ============================
 
 def predict_shelf_life_from_input(dish_name, temperature, humidity, storage):
-    """Returns raw prediction + adjusted prediction + formatted output."""
-
     dish_type = get_dish_type(dish_name)
     base_life = get_base_shelf_life(dish_name)
     nonveg_flag = is_nonveg(dish_name)
     temp_x_hum = temperature * humidity
 
-    # Encode categorical values
     dish_encoded = le_dish.transform([dish_name])[0]
     storage_encoded = le_storage.transform([storage])[0]
     dish_type_encoded = le_type.transform([dish_type])[0]
 
-    # Create feature row
     X_input = np.array([[dish_encoded, storage_encoded, temperature, humidity,
                          dish_type_encoded, base_life, nonveg_flag, temp_x_hum]])
 
-    # Scale features
     X_scaled = scaler.transform(X_input)
 
-    # Predict
     raw_pred = float(xgb_model.predict(X_scaled)[0])
 
-    # Adjust
     adjusted_pred = adjust_prediction(
         raw_pred, base_life, storage, temperature, humidity, dish_type
     )
